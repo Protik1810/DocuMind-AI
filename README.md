@@ -44,7 +44,11 @@ Ensure you have the following installed:
 1.  **Clone the Repository**
 
     ```bash
+<<<<<<< HEAD
     git clone https://github.com/Protik1810/DocuMind-AI.git
+=======
+    git clone https://github.com/yourusername/DocuMind-AI.git
+>>>>>>> b2d9d095e5041ceb1e60a27eea127ee3d0dc8d5f
     cd DocuMind-AI
     ```
 
