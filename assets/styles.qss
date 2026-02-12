@@ -1,0 +1,115 @@
+/* assets/styles.qss */
+
+/* General */
+QWidget {
+    background-color: #242933;
+    color: #ECEFF4;
+    font-family: 'Segoe UI';
+    font-size: 10pt;
+}
+
+/* GroupBox Styling */
+QGroupBox {
+    font-weight: bold;
+    border: 1px solid #3B4252;
+    border-radius: 5px;
+    margin-top: 1ex;
+    padding: 15px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 5px;
+    margin-left: 10px;
+}
+
+/* Labels */
+QLabel#titleLabel {
+    font-size: 14pt;
+    font-weight: bold;
+    color: #ECEFF4;
+    padding: 5px;
+}
+QLabel#statusLabel.available {
+    color: #A3BE8C; /* Green */
+    font-weight: bold;
+}
+QLabel#statusLabel.not_available {
+    color: #D08770; /* Orange/Red */
+}
+QLabel#dropArea {
+    background-color: #2E3440;
+    border-radius: 5px;
+    color: #81A1C1;
+    border: 2px dashed #4C566A;
+    min-height: 150px;
+}
+
+/* Buttons */
+QPushButton {
+    background-color: #434C5E;
+    border: 1px solid #4C566A;
+    border-radius: 5px;
+    padding: 8px;
+    min-height: 20px;
+}
+QPushButton:hover {
+    background-color: #4C566A;
+}
+QPushButton:pressed {
+    background-color: #5E81AC;
+}
+QPushButton:disabled {
+    background-color: #2E3440;
+    color: #4C566A;
+}
+QPushButton#startButton {
+    background-color: #A3BE8C;
+    color: #2E3440;
+    font-weight: bold;
+}
+QPushButton#clearButton {
+    background-color: transparent;
+    border: 1px solid #4C566A;
+    max-width: 50px;
+}
+
+/* Dropdowns and Checkboxes */
+QComboBox {
+    background-color: #3B4252;
+    border: 1px solid #4C566A;
+    border-radius: 3px;
+    padding: 5px;
+}
+QComboBox::drop-down {
+    border: none;
+}
+QCheckBox {
+    spacing: 10px;
+}
+
+/* Text Inputs */
+QPlainTextEdit, QTextEdit {
+    background-color: #2E3440;
+    border: 1px solid #4C566A;
+    border-radius: 5px;
+    font-family: 'Consolas', 'Courier New', monospace;
+}
+/* New style for info panel titles */
+QLabel#infoTitle {
+    font-weight: bold;
+    color: #81A1C1; /* A light blue color */
+}
+/* New style for the download progress bar */
+QProgressBar {
+    border: 1px solid #4C566A;
+    border-radius: 5px;
+    background-color: #2E3440;
+    text-align: center;
+    color: #ECEFF4;
+}
+
+QProgressBar::chunk {
+    background-color: #A3BE8C; /* Green progress */
+    border-radius: 4px;
+}

@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+
+# Virtual Environments
+.venv/
+.venv_linux/
+.venv312/
+
+# Build & Distribution
+build/
+dist/
+*.spec
+!documind.spec
+
+# Large Binary Files
+models/
+installer_output/
+
+# Application Output
+output/
+
+# IDE & Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment & Secrets
+.env
+
+# Archives & Misc
+*.rar
+*.zip
