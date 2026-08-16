@@ -29,7 +29,10 @@ class MainWindow(QMainWindow):
         self.threadpool = QThreadPool()
         self.analysis_worker = None
         self.active_model_name = config.MODEL_DEFAULT_FILENAME
-        self.selected_file = None
+        self.selected_files = []  # List for batch processing
+        self.current_batch_index = 0  # Track current file in batch
+        self.batch_summaries = []  # Store summaries for batch export
+        self.batch_raw_texts = []  # Store raw texts for batch export
         
         self._create_menu_bar()
         self._init_ui()
@@ -78,12 +81,22 @@ class MainWindow(QMainWindow):
     def _create_menu_bar(self):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("&File")
-        open_action = QAction("&Open Document...", self)
+        open_action = QAction("&Open Document(s)...", self)
         open_action.triggered.connect(self.select_files)
         file_menu.addAction(open_action)
         output_folder_action = QAction("Open &Output Folder", self)
         output_folder_action.triggered.connect(self.open_output_folder)
         file_menu.addAction(output_folder_action)
+        file_menu.addSeparator()
+        export_summary_action = QAction("Export &Summary...", self)
+        export_summary_action.triggered.connect(lambda: self.export_results('summary'))
+        file_menu.addAction(export_summary_action)
+        export_raw_action = QAction("Export &Raw Text...", self)
+        export_raw_action.triggered.connect(lambda: self.export_results('raw'))
+        file_menu.addAction(export_raw_action)
+        export_all_action = QAction("Export &All Results...", self)
+        export_all_action.triggered.connect(lambda: self.export_results('all'))
+        file_menu.addAction(export_all_action)
         file_menu.addSeparator()
         exit_action = QAction("&Exit", self)
         exit_action.triggered.connect(self.close)
@@ -146,10 +159,8 @@ class MainWindow(QMainWindow):
         self.start_btn.clicked.connect(self.start_analysis)
         self.stop_btn = QPushButton("Stop Analysis")
         layout.addWidget(self.start_btn)
-        # layout.addWidget(self.pause_btn) # Removing Pause button
         layout.addWidget(self.stop_btn)
         self.start_btn.setEnabled(False)
-        # self.pause_btn.setEnabled(False) 
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_analysis)
         return box
@@ -251,6 +262,17 @@ class MainWindow(QMainWindow):
         info_layout.addWidget(model_label_title)
         info_layout.addWidget(self.model_in_use_label)
         info_layout.addStretch()
+        # Batch progress indicator
+        self.batch_progress_label = QLabel("")
+        info_layout.addWidget(self.batch_progress_label)
+        self.batch_progress_bar = QProgressBar()
+        self.batch_progress_bar.setRange(0, 100)
+        self.batch_progress_bar.setValue(0)
+        self.batch_progress_bar.setTextVisible(True)
+        self.batch_progress_bar.setFormat("%p%")
+        self.batch_progress_bar.hide()
+        info_layout.addWidget(self.batch_progress_bar)
+        info_layout.addStretch()
         self.progress_dial = DialProgressBar()
         main_layout.addLayout(info_layout, stretch=1)
         main_layout.addWidget(self.progress_dial, stretch=1)
@@ -345,28 +367,47 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def select_files(self):
         file_types = "All Supported Files (*.pdf *.jpg *.png *.txt);;All Files (*)"
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select Document", "", file_types)
-        if file_path:
-            self.handle_files([file_path])
+        file_paths, _ = QFileDialog.getOpenFileNames(self, "Select Document(s)", "", file_types)
+        if file_paths:
+            self.handle_files(file_paths)
 
     @pyqtSlot(list)
     def handle_files(self, file_paths):
-        self.selected_file = file_paths[0] 
+        """Handle multiple file selection for batch processing."""
+        self.selected_files = file_paths
+        self.current_batch_index = 0
+        self.batch_summaries = []
+        self.batch_raw_texts = []
+        
         self.file_list_widget.clear()
-        self.file_list_widget.addItem(os.path.basename(self.selected_file))
-        filename = os.path.basename(self.selected_file)
-        ext = os.path.splitext(filename)[1].lower()
-        doc_type_map = {'.pdf': "PDF", '.txt': "Text", '.jpg': "Image", '.png': "Image"}
-        doc_type = doc_type_map.get(ext, "File")
-        self.current_file_label.setText(filename)
-        self.doc_type_label.setText(f"{doc_type} Document")
-        self.log_output.setPlainText(f"Selected file: {filename}")
+        for file_path in file_paths:
+            self.file_list_widget.addItem(os.path.basename(file_path))
+        
+        # Update UI with first file info
+        if file_paths:
+            first_file = file_paths[0]
+            filename = os.path.basename(first_file)
+            ext = os.path.splitext(filename)[1].lower()
+            doc_type_map = {'.pdf': "PDF", '.txt': "Text", '.jpg': "Image", '.png': "Image"}
+            doc_type = doc_type_map.get(ext, "File")
+            self.current_file_label.setText(filename)
+            self.doc_type_label.setText(f"{doc_type} Document")
+            
+            if len(file_paths) > 1:
+                self.log_output.setPlainText(f"Selected {len(file_paths)} files for batch analysis.\nFirst file: {filename}")
+                self.batch_progress_label.setText(f"Batch: 0 / {len(file_paths)} files")
+                self.batch_progress_bar.show()
+            else:
+                self.log_output.setPlainText(f"Selected file: {filename}")
+                self.batch_progress_label.setText("")
+                self.batch_progress_bar.hide()
+        
         self.start_btn.setEnabled(True)
 
     @pyqtSlot()
     def start_analysis(self):
         active_model = self.model_combo.currentText()
-        if not self.selected_file:
+        if not self.selected_files:
             QMessageBox.warning(self, "No File Selected", "Please select a document to analyze.")
             return
         if not active_model:
@@ -395,17 +436,63 @@ class MainWindow(QMainWindow):
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.model_in_use_label.setText(active_model)
-        temperature = self.ai_slider.value() / 100.0
-        ocr_dpi = self.ocr_slider.value()
-        proc_options = { 'ocr': self.ocr_check.isChecked(), 'images': self.img_check.isChecked(), 'tables': self.tbl_check.isChecked(), 'nlp': self.nlp_check.isChecked(), 'temperature': temperature, 'ocr_dpi': ocr_dpi }
-        user_instr = self.instr_text.toPlainText()
+        
+        # Initialize batch state
+        self.current_batch_index = 0
+        self.batch_summaries = []
+        self.batch_raw_texts = []
+        
+        # Update batch progress
+        if len(self.selected_files) > 1:
+            self.batch_progress_bar.show()
+            self.batch_progress_bar.setValue(0)
         
         self.raw_text_output.clear()
         self.summary_output.clear()
         self.log_output.clear()
+        
+        # Start processing first file
+        self._process_next_file()
 
+    def _process_next_file(self):
+        """Process the next file in the batch queue."""
+        if self.current_batch_index >= len(self.selected_files):
+            self._on_batch_complete()
+            return
+        
+        file_path = self.selected_files[self.current_batch_index]
+        filename = os.path.basename(file_path)
+        total_files = len(self.selected_files)
+        
+        # Update UI
+        self.current_file_label.setText(filename)
+        ext = os.path.splitext(filename)[1].lower()
+        doc_type_map = {'.pdf': "PDF", '.txt': "Text", '.jpg': "Image", '.png': "Image"}
+        doc_type = doc_type_map.get(ext, "File")
+        self.doc_type_label.setText(f"{doc_type} Document")
+        
+        if total_files > 1:
+            self.batch_progress_label.setText(f"Batch: {self.current_batch_index + 1} / {total_files} files")
+            batch_pct = int((self.current_batch_index / total_files) * 100)
+            self.batch_progress_bar.setValue(batch_pct)
+            self.log_output.appendPlainText(f"\n{'='*50}\nStarting file {self.current_batch_index + 1} of {total_files}: {filename}\n{'='*50}")
+        
+        # Get processing options
+        temperature = self.ai_slider.value() / 100.0
+        ocr_dpi = self.ocr_slider.value()
+        proc_options = {
+            'ocr': self.ocr_check.isChecked(),
+            'images': self.img_check.isChecked(),
+            'tables': self.tbl_check.isChecked(),
+            'nlp': self.nlp_check.isChecked(),
+            'temperature': temperature,
+            'ocr_dpi': ocr_dpi
+        }
+        user_instr = self.instr_text.toPlainText()
+        
+        # Create and start analysis pipeline
         signals = AnalysisSignals()
-        self.analysis_worker = AnalysisPipeline(self.selected_file, user_instr, proc_options, self.llm_handler, signals)
+        self.analysis_worker = AnalysisPipeline(file_path, user_instr, proc_options, self.llm_handler, signals)
         self.analysis_worker.signals.log.connect(self.log_output.appendPlainText)
         self.analysis_worker.signals.progress.connect(self.progress_dial.setValue)
         self.analysis_worker.signals.page_processed.connect(self.append_raw_text)
@@ -414,18 +501,65 @@ class MainWindow(QMainWindow):
         self.analysis_worker.signals.page_summary_ready.connect(self.on_page_summary_done)
         self.analysis_worker.signals.detailed_progress.connect(self.update_progress_info)
         self.analysis_worker.signals.status_changed.connect(self.progress_dial.setState)
-        self.analysis_worker.signals.finished.connect(self.on_analysis_finished)
-        self.analysis_worker.signals.error.connect(self.on_analysis_error)
+        self.analysis_worker.signals.finished.connect(self.on_file_analysis_finished)
+        self.analysis_worker.signals.error.connect(self.on_file_analysis_error)
         self.threadpool.start(self.analysis_worker)
 
     @pyqtSlot(str)
+    def on_file_analysis_finished(self, final_report):
+        """Handle completion of a single file in the batch."""
+        # Store results for export
+        self.batch_summaries.append(final_report)
+        self.batch_raw_texts.append(self.raw_text_output.toPlainText())
+        
+        self.current_batch_index += 1
+        
+        # Update batch progress
+        if len(self.selected_files) > 1:
+            batch_pct = int((self.current_batch_index / len(self.selected_files)) * 100)
+            self.batch_progress_bar.setValue(batch_pct)
+        
+        # Process next file or complete batch
+        if self.current_batch_index < len(self.selected_files):
+            self._process_next_file()
+        else:
+            self._on_batch_complete()
+
+    @pyqtSlot(str)
+    def on_file_analysis_error(self, error_message):
+        """Handle error for a single file in the batch."""
+        self.summary_output.append(f"\n❌ Error processing file: {error_message}\n")
+        self.log_output.appendPlainText(f"🔴 ERROR: {error_message}")
+        
+        # Move to next file
+        self.current_batch_index += 1
+        if self.current_batch_index < len(self.selected_files):
+            self._process_next_file()
+        else:
+            self._on_batch_complete()
+
+    def _on_batch_complete(self):
+        """Handle completion of the entire batch."""
+        self.summary_output.append("\n---\n✅ **Batch Analysis Complete!**")
+        self.progress_dial.setState('ready')
+        
+        # Update batch progress
+        if len(self.selected_files) > 1:
+            self.batch_progress_bar.setValue(100)
+            self.batch_progress_label.setText(f"Batch: {len(self.selected_files)} / {len(self.selected_files)} files completed")
+        
+        self.reset_controls()
+
+    @pyqtSlot(str)
     def on_analysis_finished(self, final_report):
+        """Legacy handler - kept for compatibility."""
         self.summary_output.append("\n---\n✅ **Analysis Complete!**")
         self.progress_dial.setState('ready')
         self.reset_controls()
         
     @pyqtSlot(str)
     def on_analysis_error(self, error_message):
+        """Legacy handler - kept for compatibility."""
         QMessageBox.critical(self, "Analysis Error", error_message)
         self.progress_dial.setState('stopped')
         self.reset_controls()
@@ -476,6 +610,174 @@ class MainWindow(QMainWindow):
         self.stop_btn.setEnabled(False)
         self.model_in_use_label.setText("N/A")
         self.analysis_worker = None
+    
+    # --- Export Functionality ---
+    
+    @pyqtSlot()
+    def export_results(self, export_type='all'):
+        """Export analysis results to files.
+        
+        Args:
+            export_type: 'summary', 'raw', or 'all'
+        """
+        if not self.batch_summaries and not self.batch_raw_texts:
+            QMessageBox.information(self, "No Results", "No analysis results to export. Run an analysis first.")
+            return
+        
+        # Get save location
+        file_types = {
+            'summary': "Markdown Files (*.md);;HTML Files (*.html);;Text Files (*.txt)",
+            'raw': "Text Files (*.txt)",
+            'all': "Markdown Files (*.md);;HTML Files (*.html);;Text Files (*.txt)"
+        }
+        
+        default_filename = {
+            'summary': "documind_summary",
+            'raw': "documind_raw_text",
+            'all': "documind_report"
+        }
+        
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            f"Export {export_type.title()} Results",
+            os.path.join(config.OUTPUT_DIR, default_filename.get(export_type, "documind_export")),
+            file_types.get(export_type, "All Files (*)")
+        )
+        
+        if not file_path:
+            return
+        
+        # Determine extension and format
+        ext = os.path.splitext(file_path)[1].lower()
+        if not ext:
+            # Add extension based on filter
+            if "Markdown" in selected_filter:
+                ext = ".md"
+                file_path += ext
+            elif "HTML" in selected_filter:
+                ext = ".html"
+                file_path += ext
+            else:
+                ext = ".txt"
+                file_path += ext
+        
+        try:
+            if export_type == 'summary':
+                self._export_summary(file_path, ext)
+            elif export_type == 'raw':
+                self._export_raw_text(file_path)
+            else:  # all
+                self._export_all(file_path, ext)
+            
+            QMessageBox.information(self, "Export Complete", f"Results exported to:\n{file_path}")
+            self.log_output.appendPlainText(f"📁 Results exported to: {file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export results:\n{str(e)}")
+
+    def _export_summary(self, file_path, ext):
+        """Export summary results in the specified format."""
+        combined_summary = "\n\n---\n\n".join(self.batch_summaries)
+        
+        if ext == '.md':
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(f"# {config.APP_NAME} - Analysis Summary\n\n")
+                f.write(f"Generated on: {self._get_timestamp()}\n\n")
+                f.write("## Results\n\n")
+                f.write(combined_summary)
+        elif ext == '.html':
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>{config.APP_NAME} - Analysis Summary</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }}
+        h1 {{ color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }}
+        h2 {{ color: #555; }}
+        .timestamp {{ color: #888; font-style: italic; }}
+        .summary {{ line-height: 1.6; }}
+    </style>
+</head>
+<body>
+    <h1>{config.APP_NAME} - Analysis Summary</h1>
+    <p class="timestamp">Generated on: {self._get_timestamp()}</p>
+    <div class="summary">
+        {combined_summary.replace(chr(10), '<br>')}
+    </div>
+</body>
+</html>""")
+        else:  # .txt
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(f"{config.APP_NAME} - Analysis Summary\n")
+                f.write(f"{'='*50}\n")
+                f.write(f"Generated on: {self._get_timestamp()}\n\n")
+                f.write(combined_summary)
+
+    def _export_raw_text(self, file_path):
+        """Export raw extracted text."""
+        combined_text = "\n\n".join(self.batch_raw_texts)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(combined_text)
+
+    def _export_all(self, file_path, ext):
+        """Export complete report with summary and raw text."""
+        combined_summary = "\n\n---\n\n".join(self.batch_summaries)
+        combined_text = "\n\n".join(self.batch_raw_texts)
+        
+        if ext == '.md':
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(f"# {config.APP_NAME} - Complete Report\n\n")
+                f.write(f"Generated on: {self._get_timestamp()}\n\n")
+                f.write("## AI Summary\n\n")
+                f.write(combined_summary)
+                f.write("\n\n## Raw Extracted Text\n\n")
+                f.write(combined_text)
+        elif ext == '.html':
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>{config.APP_NAME} - Complete Report</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }}
+        h1 {{ color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }}
+        h2 {{ color: #555; border-bottom: 1px solid #ddd; padding-bottom: 5px; }}
+        .timestamp {{ color: #888; font-style: italic; }}
+        .section {{ margin-bottom: 30px; }}
+        pre {{ background: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; }}
+    </style>
+</head>
+<body>
+    <h1>{config.APP_NAME} - Complete Report</h1>
+    <p class="timestamp">Generated on: {self._get_timestamp()}</p>
+    
+    <div class="section">
+        <h2>AI Summary</h2>
+        {combined_summary.replace(chr(10), '<br>')}
+    </div>
+    
+    <div class="section">
+        <h2>Raw Extracted Text</h2>
+        <pre>{combined_text}</pre>
+    </div>
+</body>
+</html>""")
+        else:  # .txt
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(f"{config.APP_NAME} - Complete Report\n")
+                f.write(f"{'='*50}\n")
+                f.write(f"Generated on: {self._get_timestamp()}\n\n")
+                f.write("AI SUMMARY\n")
+                f.write("-"*30 + "\n")
+                f.write(combined_summary)
+                f.write("\n\nRAW EXTRACTED TEXT\n")
+                f.write("-"*30 + "\n")
+                f.write(combined_text)
+
+    def _get_timestamp(self):
+        """Get formatted timestamp for exports."""
+        import time
+        return time.strftime("%Y-%m-%d %H:%M:%S")
 
     @pyqtSlot()
     def open_model_manager(self):
